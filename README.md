@@ -19,16 +19,16 @@ Funziona su Windows + Mac + Linux usando solo Python standard con Tkinter.
 
 ### Metodo 1 – Il più veloce (nessun git)
 1. Vai nella pagina del repository su GitHub
-2. Clicca sul file chat_p2p.py
+2. Clicca sul file chat-app.py
 3. Clicca il bottone Raw
-4. Premi Ctrl + S (o Cmd + S su Mac) e salva come chat_p2p.py  
+4. Premi Ctrl + S (o Cmd + S su Mac) e salva come chat-app.py  
    (controlla che sia .py e non .txt)
 5. Copia il file sulla chiavetta / Desktop del PC
 
 ### Metodo 2 – Clona il repository (se hai git)
 git clone https://github.com/RudyDeana/Lan-chat-app 
-cd Lan-chat-app
 
+cd Lan-chat-app
 
 
 ## Come avviare l'app
