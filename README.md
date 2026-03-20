@@ -1,6 +1,6 @@
-# 🚀 Chat P2P LAN - Scuola Edition
+# 🚀 Chat P2P LAN
 
-Chat privata + chat di tutti sulla rete WiFi della scuola  
+Chat privata + chat di tutti sulla rete WiFi  
 Zero server, zero installazioni extra, zero permessi admin.
 
 Funziona su Windows + Mac + Linux usando solo Python standard con Tkinter.
@@ -17,19 +17,19 @@ Funziona su Windows + Mac + Linux usando solo Python standard con Tkinter.
 
 ## Installazione super facile (30 secondi)
 
-### Metodo 1 – Il più veloce per scuola (nessun git)
+### Metodo 1 – Il più veloce (nessun git)
 1. Vai nella pagina del repository su GitHub
 2. Clicca sul file chat_p2p.py
 3. Clicca il bottone Raw
 4. Premi Ctrl + S (o Cmd + S su Mac) e salva come chat_p2p.py  
    (controlla che sia .py e non .txt)
-5. Copia il file sulla chiavetta / Desktop del PC della scuola
+5. Copia il file sulla chiavetta / Desktop del PC
 
 ### Metodo 2 – Clona il repository (se hai git)
 git clone https://github.com/TUO-USERNAME/chat-p2p-lan-scuola.git  
 cd chat-p2p-lan-scuola
 
-(Sostituisci TUO-USERNAME con il tuo username GitHub)
+
 
 ## Come avviare l'app
 
@@ -42,7 +42,7 @@ Mac
 - Terminale, nella cartella del file:
   python3 chat_p2p.py
 
-Linux / PC scuola con Linux
+Linux / PC  con Linux
 - Stesso del Mac:
   python3 chat_p2p.py
 
@@ -71,5 +71,4 @@ Soluzione: Prova Python da python.org invece di Homebrew
 - Solo locale (LAN/WiFi). Per amici da casa serve versione con IP manuale.
 - Se vuoi gruppi, suoni o versione internet → dimmelo e la aggiorniamo!
 
-Fatto da Rudy con ❤️ per divertirci a scuola  
-Non spamate troppo 😂
+Fatto da Rudy con ❤️
