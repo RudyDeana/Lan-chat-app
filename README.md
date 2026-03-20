@@ -26,8 +26,8 @@ Funziona su Windows + Mac + Linux usando solo Python standard con Tkinter.
 5. Copia il file sulla chiavetta / Desktop del PC
 
 ### Metodo 2 – Clona il repository (se hai git)
-git clone https://github.com/TUO-USERNAME/chat-p2p-lan-scuola.git  
-cd chat-p2p-lan-scuola
+git clone https://github.com/RudyDeana/Lan-chat-app 
+cd Lan-chat-app
 
 
 
