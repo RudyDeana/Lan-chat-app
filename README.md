@@ -34,17 +34,17 @@ cd Lan-chat-app
 ## Come avviare l'app
 
 Windows
-- Doppio clic su chat_p2p.py (se Python è associato ai file .py)
+- Doppio clic su chat-app.py (se Python è associato ai file .py)
 - Oppure Prompt dei comandi / PowerShell nella cartella:
-  python chat_p2p.py
+  python chat-app.py
 
 Mac
 - Terminale, nella cartella del file:
-  python3 chat_p2p.py
+- python3 chat-app.py
 
 Linux / PC  con Linux
 - Stesso del Mac:
-  python3 chat_p2p.py
+  python3 chat-app.py
 
 ## Come usarla
 1. Scrivi il tuo username
