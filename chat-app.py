@@ -10,7 +10,7 @@ import traceback
 class P2PChat:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Chat P2P LAN - Debug")
+        self.root.title("Chat P2P LAN")
         self.root.geometry("560x720")
         self.root.configure(bg="#1a1a1a")
 
@@ -21,21 +21,18 @@ class P2PChat:
             self.my_ip = socket.gethostbyname(socket.gethostname())
         except:
             self.my_ip = "127.0.0.1"
-            print("[ERRORE] Impossibile ottenere IP locale, uso 127.0.0.1")
 
-        self.peers = {}  # username → dict
+        self.peers = {}
         self.chat_windows = {}
-
         self.running = True
 
-        # UDP socket con timeout
+        # UDP socket
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.udp_sock.settimeout(2.0)
         try:
             self.udp_sock.bind(('', self.udp_port))
         except Exception as e:
-            print(f"[ERRORE BIND UDP] {e}")
             messagebox.showerror("Errore", f"Porta UDP {self.udp_port} occupata?\n{e}")
             self.running = False
             self.root.destroy()
@@ -48,7 +45,6 @@ class P2PChat:
             self.tcp_sock.bind(('', self.port))
             self.tcp_sock.listen(5)
         except Exception as e:
-            print(f"[ERRORE BIND TCP] {e}")
             messagebox.showerror("Errore", f"Porta TCP {self.port} occupata?\n{e}")
             self.running = False
             self.root.destroy()
@@ -62,7 +58,7 @@ class P2PChat:
         self.ask_username()
 
     def ask_username(self):
-        self.username = simpledialog.askstring("Username", "Inserisci il tuo nome:")
+        self.username = simpledialog.askstring("Benvenuto", "Inserisci il tuo username:")
         if not self.username or not self.username.strip():
             self.username = f"Anon{int(time.time()) % 9999}"
         self.root.title(f"LAN Chat • {self.username}")
@@ -96,9 +92,8 @@ class P2PChat:
             try:
                 msg = f"DISC|{self.username}|{self.port}".encode()
                 self.udp_sock.sendto(msg, ('<broadcast>', self.udp_port))
-                print(f"[BCAST] Inviato discovery come {self.username}")
-            except Exception as e:
-                print(f"[BCAST ERR] {e}")
+            except:
+                pass
             time.sleep(3)
 
     def udp_listen_loop(self):
@@ -111,11 +106,10 @@ class P2PChat:
                     port = int(p_str)
                     if uname != self.username and addr[0] != self.my_ip:
                         self.peers[uname] = {'ip': addr[0], 'port': port, 'last': time.time()}
-                        print(f"[DISC] Trovato {uname} da {addr[0]}:{port}")
             except socket.timeout:
                 continue
-            except Exception as e:
-                print(f"[UDP LISTEN ERR] {e}")
+            except:
+                pass
 
     def cleanup_loop(self):
         while self.running:
@@ -123,18 +117,16 @@ class P2PChat:
             now = time.time()
             dead = [u for u, d in self.peers.items() if now - d['last'] > 45]
             for u in dead:
-                print(f"[CLEAN] Rimuovo offline: {u}")
                 del self.peers[u]
 
     def tcp_listen_loop(self):
         while self.running:
             try:
                 client, addr = self.tcp_sock.accept()
-                print(f"[TCP] Connessione da {addr}")
                 threading.Thread(target=self.handle_tcp_client, args=(client,), daemon=True).start()
-            except Exception as e:
+            except:
                 if self.running:
-                    print(f"[TCP LISTEN ERR] {e}")
+                    pass
 
     def handle_tcp_client(self, sock):
         try:
@@ -151,12 +143,11 @@ class P2PChat:
 
                 try:
                     msg = json.loads(data.decode('utf-8', errors='ignore'))
-                    print(f"[RCV] {msg.get('type')} da {msg.get('from')}")
                     self.process_incoming(msg)
-                except json.JSONDecodeError:
-                    print("[JSON ERR] Messaggio corrotto")
-        except Exception as e:
-            print(f"[TCP CLIENT ERR] {traceback.format_exc()}")
+                except:
+                    pass
+        except:
+            pass
         finally:
             sock.close()
 
@@ -164,7 +155,9 @@ class P2PChat:
         typ = msg.get('type')
         sender = msg.get('from')
         content = msg.get('msg', '')
-        if sender == self.username: return
+
+        if sender == self.username:
+            return
 
         ts = datetime.now().strftime("%H:%M")
 
@@ -188,27 +181,28 @@ class P2PChat:
         length = len(payload).to_bytes(4, 'big')
 
         if target_ip and target_port:
-            # privato
+            
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(4)
                 s.connect((target_ip, target_port))
                 s.send(length + payload)
                 s.close()
-                print(f"[SND PRIV] a {target_ip}:{target_port}")
-            except Exception as e:
-                print(f"[SEND PRIV FAIL] {e}")
+            except:
+                pass
         else:
-            # globale
-            for p in list(self.peers.values()):
+           
+            for uname, p in list(self.peers.items()):
+                if p['ip'] == self.my_ip:
+                    continue
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     s.settimeout(4)
                     s.connect((p['ip'], p['port']))
                     s.send(length + payload)
                     s.close()
-                except Exception as e:
-                    print(f"[SEND GLOBAL FAIL a {p['ip']}:{p['port']}] {e}")
+                except:
+                    pass
 
     def open_global(self):
         if 'global' in self.chat_windows and self.chat_windows['global']['win'].winfo_exists():
@@ -216,7 +210,7 @@ class P2PChat:
             return
 
         win = tk.Toplevel(self.root)
-        win.title("Globale")
+        win.title("Chat Globale")
         win.geometry("560x640")
         win.configure(bg="#1a1a1a")
 
@@ -248,7 +242,7 @@ class P2PChat:
     def open_private_from_list(self, event):
         sel = self.user_list.curselection()
         if not sel: return
-        uname = self.user_list.get(sel)
+        uname = self.user_list.get(sel[0])
         self.open_private(uname)
 
     def open_private(self, target, initial_msg=None):
@@ -261,11 +255,11 @@ class P2PChat:
             return
 
         if target not in self.peers:
-            messagebox.showinfo("Info", f"{target} non è più online")
+            messagebox.showinfo("Info", f"{target} non sembra più online")
             return
 
         win = tk.Toplevel(self.root)
-        win.title(f"Con {target}")
+        win.title(f"Chat con {target}")
         win.geometry("560x640")
         win.configure(bg="#1a1a1a")
 
@@ -311,7 +305,4 @@ class P2PChat:
 
 
 if __name__ == "__main__":
-    try:
-        app = P2PChat()
-    except Exception as e:
-        print(f"CRASH ALL'AVVIO: {traceback.format_exc()}")
+    app = P2PChat()
