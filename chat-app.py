@@ -5,277 +5,313 @@ import tkinter as tk
 from tkinter import scrolledtext, simpledialog, messagebox
 from datetime import datetime
 import json
+import traceback
 
 class P2PChat:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Chat P2P LAN")
-        self.root.geometry("540x700")
-        self.root.configure(bg="#181a1b")  # dark ma non nero puro
+        self.root.title("Chat P2P LAN - Debug")
+        self.root.geometry("560x720")
+        self.root.configure(bg="#1a1a1a")
 
         self.username = None
         self.port = 5555
         self.udp_port = 5556
-        self.my_ip = socket.gethostbyname(socket.gethostname())
+        try:
+            self.my_ip = socket.gethostbyname(socket.gethostname())
+        except:
+            self.my_ip = "127.0.0.1"
+            print("[ERRORE] Impossibile ottenere IP locale, uso 127.0.0.1")
 
-        self.peers = {}
-        self.chat_windows = {}  # 'global' o ('private', username)
+        self.peers = {}  # username → dict
+        self.chat_windows = {}
 
-        # UDP per discovery
+        self.running = True
+
+        # UDP socket con timeout
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.udp_sock.bind(('', self.udp_port))
+        self.udp_sock.settimeout(2.0)
+        try:
+            self.udp_sock.bind(('', self.udp_port))
+        except Exception as e:
+            print(f"[ERRORE BIND UDP] {e}")
+            messagebox.showerror("Errore", f"Porta UDP {self.udp_port} occupata?\n{e}")
+            self.running = False
+            self.root.destroy()
+            return
 
-        # TCP per messaggi
+        # TCP listener
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tcp_sock.bind(('', self.port))
-        self.tcp_sock.listen(5)
+        self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.tcp_sock.bind(('', self.port))
+            self.tcp_sock.listen(5)
+        except Exception as e:
+            print(f"[ERRORE BIND TCP] {e}")
+            messagebox.showerror("Errore", f"Porta TCP {self.port} occupata?\n{e}")
+            self.running = False
+            self.root.destroy()
+            return
 
-        threading.Thread(target=self.udp_broadcast, daemon=True).start()
-        threading.Thread(target=self.udp_listen, daemon=True).start()
-        threading.Thread(target=self.tcp_listen, daemon=True).start()
-        threading.Thread(target=self.cleanup_thread, daemon=True).start()
+        threading.Thread(target=self.udp_broadcast_loop, daemon=True).start()
+        threading.Thread(target=self.udp_listen_loop, daemon=True).start()
+        threading.Thread(target=self.tcp_listen_loop, daemon=True).start()
+        threading.Thread(target=self.cleanup_loop, daemon=True).start()
 
         self.ask_username()
 
     def ask_username(self):
-        self.username = simpledialog.askstring("Benvenuto", "Scegli il tuo username:")
+        self.username = simpledialog.askstring("Username", "Inserisci il tuo nome:")
         if not self.username or not self.username.strip():
-            self.username = f"U{int(time.time()) % 10000}"
-
-        self.root.title(f"Chat LAN • {self.username}")
-        self.build_main_ui()
+            self.username = f"Anon{int(time.time()) % 9999}"
+        self.root.title(f"LAN Chat • {self.username}")
+        self.build_ui()
         self.root.mainloop()
 
-    def build_main_ui(self):
-        tk.Label(self.root, text=f"Utenti online • {self.username}",
-                 font=("Segoe UI", 15, "bold"), bg="#181a1b", fg="#f0f0f0").pack(pady=16)
+    def build_ui(self):
+        tk.Label(self.root, text=f"Utenti • {self.username}", font=("Segoe UI", 14, "bold"),
+                 bg="#1a1a1a", fg="#eeeeee").pack(pady=12)
 
-        frame_list = tk.Frame(self.root, bg="#181a1b")
-        frame_list.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+        self.user_list = tk.Listbox(self.root, font=("Segoe UI", 11), height=12,
+                                    bg="#252525", fg="#dddddd", selectbackground="#4444aa")
+        self.user_list.pack(fill="both", expand=True, padx=12, pady=4)
+        self.user_list.bind('<<ListboxSelect>>', self.open_private_from_list)
 
-        self.users_list = tk.Listbox(frame_list, height=14, font=("Segoe UI", 12),
-                                     bg="#222426", fg="#e8e8e8", selectbackground="#3a6ea5",
-                                     selectforeground="white", activestyle="none", bd=0)
-        self.users_list.pack(fill="both", expand=True)
+        tk.Button(self.root, text="Chat Globale", command=self.open_global,
+                  font=("Segoe UI", 12, "bold"), bg="#006600", fg="white",
+                  activebackground="#004d00").pack(pady=16, ipadx=20, ipady=8)
 
-        self.users_list.bind('<<ListboxSelect>>', self.on_user_select)
+        self.update_list_loop()
 
-        btn_global = tk.Button(self.root, text="Chat di tutti",
-                               command=self.open_global_chat,
-                               font=("Segoe UI", 13, "bold"),
-                               bg="#2e7d32", fg="white",
-                               activebackground="#1b5e20",
-                               activeforeground="white",
-                               relief="flat", bd=0, padx=30, pady=12,
-                               cursor="hand2")
-        btn_global.pack(pady=16, fill="x", padx=40)
+    def update_list_loop(self):
+        if not self.running: return
+        self.user_list.delete(0, tk.END)
+        for u in sorted(self.peers):
+            self.user_list.insert(tk.END, u)
+        self.root.after(3000, self.update_list_loop)
 
-        # hover effect semplice
-        btn_global.bind("<Enter>", lambda e: btn_global.config(bg="#388e3c"))
-        btn_global.bind("<Leave>", lambda e: btn_global.config(bg="#2e7d32"))
-
-        self.update_users_list()
-
-    def update_users_list(self):
-        self.users_list.delete(0, tk.END)
-        for uname in sorted(self.peers.keys()):
-            self.users_list.insert(tk.END, uname)
-        self.root.after(4000, self.update_users_list)
-
-    def udp_broadcast(self):
-        while True:
+    def udp_broadcast_loop(self):
+        while self.running:
             try:
                 msg = f"DISC|{self.username}|{self.port}".encode()
                 self.udp_sock.sendto(msg, ('<broadcast>', self.udp_port))
-            except:
-                pass
-            time.sleep(4)
+                print(f"[BCAST] Inviato discovery come {self.username}")
+            except Exception as e:
+                print(f"[BCAST ERR] {e}")
+            time.sleep(3)
 
-    def udp_listen(self):
-        while True:
+    def udp_listen_loop(self):
+        while self.running:
             try:
                 data, addr = self.udp_sock.recvfrom(512)
-                parts = data.decode(errors='ignore').split('|')
+                parts = data.decode('utf-8', errors='ignore').split('|')
                 if len(parts) == 3 and parts[0] == "DISC":
-                    uname, p = parts[1], int(parts[2])
+                    uname, p_str = parts[1], parts[2]
+                    port = int(p_str)
                     if uname != self.username and addr[0] != self.my_ip:
-                        self.peers[uname] = {'ip': addr[0], 'port': p, 'last_seen': time.time()}
-            except:
-                pass
+                        self.peers[uname] = {'ip': addr[0], 'port': port, 'last': time.time()}
+                        print(f"[DISC] Trovato {uname} da {addr[0]}:{port}")
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"[UDP LISTEN ERR] {e}")
 
-    def cleanup_thread(self):
-        while True:
-            time.sleep(25)
+    def cleanup_loop(self):
+        while self.running:
+            time.sleep(15)
             now = time.time()
-            expired = [u for u, d in self.peers.items() if now - d['last_seen'] > 75]
-            for u in expired:
-                self.peers.pop(u, None)
+            dead = [u for u, d in self.peers.items() if now - d['last'] > 45]
+            for u in dead:
+                print(f"[CLEAN] Rimuovo offline: {u}")
+                del self.peers[u]
 
-    def tcp_listen(self):
-        while True:
+    def tcp_listen_loop(self):
+        while self.running:
             try:
-                client, _ = self.tcp_sock.accept()
-                threading.Thread(target=self.handle_client, args=(client,), daemon=True).start()
-            except:
-                pass
+                client, addr = self.tcp_sock.accept()
+                print(f"[TCP] Connessione da {addr}")
+                threading.Thread(target=self.handle_tcp_client, args=(client,), daemon=True).start()
+            except Exception as e:
+                if self.running:
+                    print(f"[TCP LISTEN ERR] {e}")
 
-    def handle_client(self, client):
+    def handle_tcp_client(self, sock):
         try:
-            while True:
-                len_b = client.recv(4)
-                if not len_b: break
-                length = int.from_bytes(len_b, 'big')
-                data = client.recv(length)
-                if not data: break
-                msg = json.loads(data.decode(errors='ignore'))
-                self.process_message(msg)
-        except:
-            pass
-        finally:
-            client.close()
+            while self.running:
+                len_bytes = sock.recv(4)
+                if len(len_bytes) < 4: break
+                length = int.from_bytes(len_bytes, 'big')
+                data = b''
+                while len(data) < length:
+                    chunk = sock.recv(length - len(data))
+                    if not chunk: break
+                    data += chunk
+                if len(data) != length: break
 
-    def process_message(self, msg):
+                try:
+                    msg = json.loads(data.decode('utf-8', errors='ignore'))
+                    print(f"[RCV] {msg.get('type')} da {msg.get('from')}")
+                    self.process_incoming(msg)
+                except json.JSONDecodeError:
+                    print("[JSON ERR] Messaggio corrotto")
+        except Exception as e:
+            print(f"[TCP CLIENT ERR] {traceback.format_exc()}")
+        finally:
+            sock.close()
+
+    def process_incoming(self, msg):
         typ = msg.get('type')
         sender = msg.get('from')
-        content = msg.get('msg')
+        content = msg.get('msg', '')
         if sender == self.username: return
 
         ts = datetime.now().strftime("%H:%M")
 
-        tag = "received"
-
         if typ == 'global':
-            if 'global' in self.chat_windows and self.chat_windows['global'].winfo_exists():
+            if 'global' in self.chat_windows:
                 t = self.chat_windows['global']['text']
-                t.insert(tk.END, f"[{ts}] {sender}: {content}\n", tag)
+                t.insert(tk.END, f"[{ts}] {sender}: {content}\n", "in")
                 t.see(tk.END)
 
         elif typ == 'private':
-            key = ('private', sender)
-            if key in self.chat_windows and self.chat_windows[key].winfo_exists():
+            key = ('p', sender)
+            if key in self.chat_windows:
                 t = self.chat_windows[key]['text']
-                t.insert(tk.END, f"[{ts}] {sender}: {content}\n", tag)
+                t.insert(tk.END, f"[{ts}] {sender}: {content}\n", "in")
                 t.see(tk.END)
             else:
-                self.open_private_chat(sender, initial=f"[{ts}] {sender}: {content}\n")
+                self.open_private(sender, f"[{ts}] {sender}: {content}\n")
 
-    def send_to_peer(self, ip, port, data):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((ip, port))
-            payload = json.dumps(data).encode()
-            s.send(len(payload).to_bytes(4, 'big') + payload)
-            s.close()
-        except:
-            pass
+    def send_message(self, data, target_ip=None, target_port=None):
+        payload = json.dumps(data).encode('utf-8')
+        length = len(payload).to_bytes(4, 'big')
 
-    def create_chat_window(self, title, is_global=False, target=None, initial=None):
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.geometry("540x640")
-        win.configure(bg="#181a1b")
+        if target_ip and target_port:
+            # privato
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(4)
+                s.connect((target_ip, target_port))
+                s.send(length + payload)
+                s.close()
+                print(f"[SND PRIV] a {target_ip}:{target_port}")
+            except Exception as e:
+                print(f"[SEND PRIV FAIL] {e}")
+        else:
+            # globale
+            for p in list(self.peers.values()):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(4)
+                    s.connect((p['ip'], p['port']))
+                    s.send(length + payload)
+                    s.close()
+                except Exception as e:
+                    print(f"[SEND GLOBAL FAIL a {p['ip']}:{p['port']}] {e}")
 
-        text = scrolledtext.ScrolledText(win, wrap=tk.WORD, font=("Consolas", 11),
-                                         bg="#202224", fg="#e8ecef",
-                                         insertbackground="#ffffff",
-                                         selectbackground="#4a6fa5")
-        text.pack(fill="both", expand=True, padx=12, pady=12)
-        text.tag_config("sent", foreground="#66bb6a")
-        text.tag_config("received", foreground="#81d4fa")
-
-        input_frame = tk.Frame(win, bg="#181a1b")
-        input_frame.pack(fill="x", padx=12, pady=(0,12))
-
-        entry = tk.Entry(input_frame, font=("Segoe UI", 12),
-                         bg="#2a2c2e", fg="#f0f0f0",
-                         insertbackground="#ffffff", relief="flat")
-        entry.pack(side="left", fill="x", expand=True, ipady=6, padx=(0,6))
-
-        send_btn = tk.Button(input_frame, text="Invia", font=("Segoe UI", 11, "bold"),
-                             bg="#0288d1", fg="white",
-                             activebackground="#0277bd", relief="flat", bd=0,
-                             padx=16, pady=8, cursor="hand2")
-        send_btn.pack(side="right")
-
-        send_btn.bind("<Enter>", lambda e: send_btn.config(bg="#039be5"))
-        send_btn.bind("<Leave>", lambda e: send_btn.config(bg="#0288d1"))
-
-        key = 'global' if is_global else ('private', target)
-        self.chat_windows[key] = {'window': win, 'text': text, 'entry': entry}
-
-        if initial:
-            text.insert(tk.END, initial, "received")
-            text.see(tk.END)
-
-        def send_func():
-            if is_global:
-                self.send_global(entry, text)
-            else:
-                self.send_private(entry, text, target)
-
-        send_btn.config(command=send_func)
-        entry.bind("<Return>", lambda e: send_func())
-
-        win.protocol("WM_DELETE_WINDOW", lambda: self.chat_windows.pop(key, None) or win.destroy())
-        entry.focus()
-
-        return win, text, entry
-
-    def open_global_chat(self):
-        if 'global' in self.chat_windows and self.chat_windows['global']['window'].winfo_exists():
-            self.chat_windows['global']['window'].lift()
+    def open_global(self):
+        if 'global' in self.chat_windows and self.chat_windows['global']['win'].winfo_exists():
+            self.chat_windows['global']['win'].lift()
             return
 
-        self.create_chat_window("Chat di tutti", is_global=True)
+        win = tk.Toplevel(self.root)
+        win.title("Globale")
+        win.geometry("560x640")
+        win.configure(bg="#1a1a1a")
 
-    def send_global(self, entry, text_widget):
-        msg = entry.get().strip()
-        if not msg: return
+        text = scrolledtext.ScrolledText(win, font=("Consolas", 11), bg="#222222", fg="#eeeeee",
+                                         insertbackground="white")
+        text.pack(fill="both", expand=True, padx=10, pady=10)
+        text.tag_config("out", foreground="#aaffaa")
+        text.tag_config("in", foreground="#88ccff")
 
-        ts = datetime.now().strftime("%H:%M")
-        text_widget.insert(tk.END, f"[{ts}] Tu: {msg}\n", "sent")
-        text_widget.see(tk.END)
-        entry.delete(0, tk.END)
+        entry = tk.Entry(win, font=("Segoe UI", 12), bg="#333333", fg="white", insertbackground="white")
+        entry.pack(fill="x", padx=10, pady=5, ipady=4)
 
-        data = {'type': 'global', 'from': self.username, 'msg': msg}
-        for peer in list(self.peers.values()):
-            self.send_to_peer(peer['ip'], peer['port'], data)
+        def do_send():
+            m = entry.get().strip()
+            if not m: return
+            ts = datetime.now().strftime("%H:%M")
+            text.insert(tk.END, f"[{ts}] Tu: {m}\n", "out")
+            text.see(tk.END)
+            entry.delete(0, tk.END)
+            self.send_message({'type': 'global', 'from': self.username, 'msg': m})
 
-    def on_user_select(self, event):
-        sel = self.users_list.curselection()
+        tk.Button(win, text="Invia", command=do_send, bg="#006600", fg="white").pack(pady=5)
+
+        entry.bind("<Return>", lambda e: do_send())
+
+        self.chat_windows['global'] = {'win': win, 'text': text}
+        win.protocol("WM_DELETE_WINDOW", lambda: self.chat_windows.pop('global', None) or win.destroy())
+
+    def open_private_from_list(self, event):
+        sel = self.user_list.curselection()
         if not sel: return
-        uname = self.users_list.get(sel[0])
-        self.open_private_chat(uname)
+        uname = self.user_list.get(sel)
+        self.open_private(uname)
 
-    def open_private_chat(self, target, initial=None):
-        key = ('private', target)
-        if key in self.chat_windows and self.chat_windows[key]['window'].winfo_exists():
-            self.chat_windows[key]['window'].lift()
-            if initial:
-                self.chat_windows[key]['text'].insert(tk.END, initial, "received")
+    def open_private(self, target, initial_msg=None):
+        key = ('p', target)
+        if key in self.chat_windows and self.chat_windows[key]['win'].winfo_exists():
+            self.chat_windows[key]['win'].lift()
+            if initial_msg:
+                self.chat_windows[key]['text'].insert(tk.END, initial_msg, "in")
                 self.chat_windows[key]['text'].see(tk.END)
             return
 
-        self.create_chat_window(f"Chat con {target}", is_global=False, target=target, initial=initial)
-
-    def send_private(self, entry, text_widget, target):
-        msg = entry.get().strip()
-        if not msg: return
-
-        ts = datetime.now().strftime("%H:%M")
-        text_widget.insert(tk.END, f"[{ts}] Tu: {msg}\n", "sent")
-        text_widget.see(tk.END)
-        entry.delete(0, tk.END)
-
         if target not in self.peers:
-            messagebox.showwarning("Offline?", f"{target} non sembra raggiungibile al momento.")
+            messagebox.showinfo("Info", f"{target} non è più online")
             return
 
-        data = {'type': 'private', 'from': self.username, 'msg': msg}
-        peer = self.peers[target]
-        self.send_to_peer(peer['ip'], peer['port'], data)
+        win = tk.Toplevel(self.root)
+        win.title(f"Con {target}")
+        win.geometry("560x640")
+        win.configure(bg="#1a1a1a")
+
+        text = scrolledtext.ScrolledText(win, font=("Consolas", 11), bg="#222222", fg="#eeeeee",
+                                         insertbackground="white")
+        text.pack(fill="both", expand=True, padx=10, pady=10)
+        text.tag_config("out", foreground="#aaffaa")
+        text.tag_config("in", foreground="#88ccff")
+
+        entry = tk.Entry(win, font=("Segoe UI", 12), bg="#333333", fg="white", insertbackground="white")
+        entry.pack(fill="x", padx=10, pady=5, ipady=4)
+
+        def do_send():
+            m = entry.get().strip()
+            if not m: return
+            ts = datetime.now().strftime("%H:%M")
+            text.insert(tk.END, f"[{ts}] Tu: {m}\n", "out")
+            text.see(tk.END)
+            entry.delete(0, tk.END)
+            peer = self.peers[target]
+            self.send_message({'type': 'private', 'from': self.username, 'msg': m},
+                              peer['ip'], peer['port'])
+
+        tk.Button(win, text="Invia", command=do_send, bg="#006600", fg="white").pack(pady=5)
+
+        entry.bind("<Return>", lambda e: do_send())
+
+        self.chat_windows[key] = {'win': win, 'text': text}
+        if initial_msg:
+            text.insert(tk.END, initial_msg, "in")
+            text.see(tk.END)
+
+        win.protocol("WM_DELETE_WINDOW", lambda: self.chat_windows.pop(key, None) or win.destroy())
+
+    def destroy(self):
+        self.running = False
+        try:
+            self.udp_sock.close()
+            self.tcp_sock.close()
+        except:
+            pass
+        self.root.destroy()
 
 
 if __name__ == "__main__":
-    P2PChat()
+    try:
+        app = P2PChat()
+    except Exception as e:
+        print(f"CRASH ALL'AVVIO: {traceback.format_exc()}")
